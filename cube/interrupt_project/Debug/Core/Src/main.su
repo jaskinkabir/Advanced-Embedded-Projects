@@ -1,0 +1,8 @@
+../Drivers/CMSIS/Include/core_cm0.h:623:22:__NVIC_EnableIRQ	16	static
+../Core/Src/main.c:34:20:setup_blink_timer	8	static
+../Core/Src/main.c:63:6:TIM3_IRQHandler	8	static
+../Core/Src/main.c:70:20:setup_debounce_timer	8	static
+../Core/Src/main.c:84:6:EXTI4_15_IRQHandler	8	static
+../Core/Src/main.c:92:20:setup_gpio	8	static
+../Core/Src/main.c:121:6:setup	8	static
+../Core/Src/main.c:130:5:main	8	static
