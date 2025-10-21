@@ -3,8 +3,8 @@ This repo holds the project files for my Advanced Embedded Systems class at UNC 
 # Projects
 ## [Project 1: Stack Frame Analysis](./cube/stackframedebug)
 Intro to STM Cube IDE, the memory viewer, and function stack frames.
-## [Project 2: GPIO and External Interrupts](./cube/gpio_exti)
+## [Project 2: GPIO and External Interrupts](./cube/interrupt_project)
 GPIO configuration, external interrupts, debouncing, and PWM signal generation.
-## [Project 3: SPI LCD Control](./cube/spi_lcd)
+## [Project 3: SPI LCD Control (in progress)](./cube/spi_lcd)
 Interfacing with an LCD over SPI
 
