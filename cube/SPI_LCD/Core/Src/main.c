@@ -1,66 +1,63 @@
-#include <stdint.h>
-#include "stm32f091xc.h"
+// lcd_display.c  
+#include <stdint.h>  
+#include "stm32f091xc.h"  
 
-/*
-GFX01M2 LCD Pins
-Pins:
-  PA1: ~Reset (RST) (active low)
-  PA5: Serial Clock (SCK)
-  PA7: Master Out Slave In (MOSI)
-  PA9: Chip Select (CS) (STM ds says active high)
-  
-  PB10: Data Command (DC) (STM datasheet calls this write enable)
-*/
-#define RESET_PORT GPIOA
-#define RESET_PIN 1
-#define SCK_PORT GPIOA
-#define SCK_PIN 5
-#define MOSI_PORT GPIOA
-#define MOSI_PIN 7
-#define CHIP_SELECT_PORT GPIOA
-#define CHIP_SELECT_PIN 9
-#define GPIO_AF_MODE 0b10
-#define GPIO_OUT_MODE 0b01
+/*  
+  GFX01M2 / MB1642-DT022CTFT module  
+  Pins (wired from MCU):  
+    PA1  -> RST (active low)  
+    PA5  -> SPI1_SCK  
+    PA7  -> SPI1_MOSI  
+    PA9  -> CS  (Chip Select)  
+    PB10 -> DC  (Data/Command)  
+    PB8  -> Backlight (optional, if module supports)  
+*/  
 
-#define DATA_COMMAND_PORT GPIOB
-#define DATA_COMMAND_PIN 10
-#define BACKLIGHT_PORT GPIOB
-#define BACKLIGHT_PIN 8
+#define RESET_PORT        GPIOA  
+#define RESET_PIN         1  
+#define SCK_PORT          GPIOA  
+#define SCK_PIN           5  
+#define MOSI_PORT         GPIOA  
+#define MOSI_PIN          7  
+#define CS_PORT           GPIOA  
+#define CS_PIN            9  
+#define DC_PORT           GPIOB  
+#define DC_PIN            10  
 
+#define GPIO_AF_MODE      0b10  
+#define GPIO_OUT_MODE     0b01  
+#define GPIO_SPI_AF      0    // AF0 for SPI1 on PA5, PA7
 
-#define SPI_CLOCK_PRESCALE 0b011
-#define SPI_DATA_SIZE_8BIT 0b0111
-#define SPI_AF_MODE 0b0000
+#define SPI_CLOCK_PRESCALE  0b000   // f_PCLK / 2  
+#define SPI_DATA_SIZE_8BIT  0b0111  // for CR2 DS bits  
 
-#define SLEEP_OUT 0x11
-#define PIXEL_FORMAT_SET 0x3A
-#define PIXEL_FORMAT_16BIT 0x55
-#define MEM_ACCESS_CTRL 0x36
-#define DISPLAY_ORIENTATION 0x48
-#define DISPLAY_ON 0x29
-#define MEM_WRITE 0x2C
-#define COL_ADDR_SET 0x2A
-#define ROW_ADDR_SET 0x2B
-#define DISPLAY_OFF 0x28
+#define SLEEP_OUT         0x11  
+#define PIXEL_FORMAT_SET  0x3A  
+#define PIXEL_FORMAT_16BIT 0x55  
+#define MEM_ACCESS_CTRL   0x36  
+#define DISPLAY_ORIENTATION 0x48  
+#define DISPLAY_ON        0x29  
+#define MEM_WRITE         0x2C  
+#define COL_ADDR_SET      0x2A  
+#define ROW_ADDR_SET      0x2B  
 
-#define RESET_ACTIVE_VAL 0
-#define RESET_INACTIVE_VAL 1
+#define RESET_ACTIVE_VAL   0  
+#define RESET_INACTIVE_VAL 1  
 
-#define CHIP_SELECT_ACTIVE_VAL 1
-#define CHIP_SELECT_INACTIVE_VAL 0
+#define CS_ACTIVE_VAL      0   // assuming active‐low  
+#define CS_INACTIVE_VAL    1  
 
-#define DC_COMMAND_MODE_VAL 0
-#define DC_DATA_MODE_VAL 1
+#define DC_COMMAND_MODE_VAL  0  
+#define DC_DATA_MODE_VAL     1  
 
-#define LCD_WIDTH 240
-#define LCD_HEIGHT 320
-
-
+#define LCD_WIDTH     240  
+#define LCD_HEIGHT    320  
 
 static inline void set_gpio_mode(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t mode) {
   GPIOx->MODER &= ~(0b11 << (pin * 2));
   GPIOx->MODER |= (mode << (pin * 2));
 }
+
 static inline void set_af(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t af) {
   if (pin < 8) {
     GPIOx->AFR[0] &= ~(0b1111 << (pin * 4));
@@ -73,130 +70,160 @@ static inline void set_af(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t af) {
 
 static inline void set_gpio_data(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t value) {
   if (value) {
-    GPIOx->ODR |= (1 << pin);
+    GPIOx->ODR |= (1U << pin);
   } else {
-    GPIOx->ODR &= ~(1 << pin);
+    GPIOx->ODR &= ~(1U << pin);
   }
 }
 
+static inline void lcd_cs_active(void) {
+  set_gpio_data(CS_PORT, CS_PIN, CS_ACTIVE_VAL);
+}
+static inline void lcd_cs_inactive(void) {
+  set_gpio_data(CS_PORT, CS_PIN, CS_INACTIVE_VAL);
+}
 
+static void delay_approx(uint32_t loops) {
+  for (volatile uint32_t i = 0; i < loops; ++i) {
+    __asm__("nop");
+  }
+}
 
-static inline void init_lcd_gpio() {
+static inline void init_lcd_gpio(void) {
   RCC->AHBENR |= RCC_AHBENR_GPIOAEN | RCC_AHBENR_GPIOBEN;
 
-  set_gpio_mode(RESET_PORT, RESET_PIN, GPIO_OUT_MODE);
-  set_gpio_mode(DATA_COMMAND_PORT, DATA_COMMAND_PIN, GPIO_OUT_MODE);
-  set_gpio_mode(BACKLIGHT_PORT, BACKLIGHT_PIN, GPIO_OUT_MODE);
-  set_gpio_mode(CHIP_SELECT_PORT, CHIP_SELECT_PIN, GPIO_OUT_MODE);
+  // CS, RESET, DC, as outputs
+  set_gpio_mode(CS_PORT,      CS_PIN,      GPIO_OUT_MODE);
+  set_gpio_mode(RESET_PORT,   RESET_PIN,   GPIO_OUT_MODE);
+  set_gpio_mode(DC_PORT,      DC_PIN,      GPIO_OUT_MODE);
 
-  set_gpio_mode(SCK_PORT, SCK_PIN, GPIO_AF_MODE);
-  set_af(SCK_PORT, SCK_PIN, SPI_AF_MODE); // AF0 for SPI SCK
-
+  // SCK, MOSI as AF
+  set_gpio_mode(SCK_PORT,  SCK_PIN,  GPIO_AF_MODE);
+  set_af(SCK_PORT,  SCK_PIN,  GPIO_SPI_AF);  // AF0
   set_gpio_mode(MOSI_PORT, MOSI_PIN, GPIO_AF_MODE);
-  set_af(MOSI_PORT, MOSI_PIN, SPI_AF_MODE); // AF0 for SPI MOSI
+  set_af(MOSI_PORT, MOSI_PIN, GPIO_SPI_AF);  // AF0
+
+  // Default states
+  set_gpio_data(CS_PORT, CS_PIN, CS_INACTIVE_VAL);
+  set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
+  set_gpio_data(RESET_PORT, RESET_PIN, RESET_INACTIVE_VAL);
 
 }
-static inline void init_spi() {
+
+static inline void init_spi(void) {
   RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
 
   SPI1->CR1 = 0;
-  SPI1->CR1 |= SPI_CR1_MSTR; // Master mode
-  SPI1->CR1 |= (SPI_CLOCK_PRESCALE << SPI_CR1_BR_Pos); // Set clock prescaler
-  SPI1->CR1 |= SPI_CR1_SSM | SPI_CR1_SSI; // Software slave management
-  SPI1->CR1 |= (SPI_CR1_BIDIOE); // 2-line TX only mode
-
-
   SPI1->CR2 = 0;
-  // Remove this if it doesn't work
-  // SPI1->CR2 |= (SPI_CR2_SSOE); // SS output enable
-  //SPI1->CR2 |= (SPI_CR2_NSSP); // NSS pulse management enable (datasheet says chip select *can* be pulsed between writes)
-  
-  SPI1->CR2 |= (SPI_DATA_SIZE_8BIT << SPI_CR2_DS_Pos); // 8-bit data size
 
-  SPI1->CR1 |= SPI_CR1_SPE; // Enable SPI
+  SPI1->CR1 |= SPI_CR1_MSTR;  // Master mode
+  SPI1->CR1 |= (SPI_CLOCK_PRESCALE << SPI_CR1_BR_Pos);
+  SPI1->CR1 |= SPI_CR1_SSM | SPI_CR1_SSI;  // Software slave management, SSI=1
+
+  // SPI mode 0
+  SPI1->CR1 &= ~(SPI_CR1_CPOL | SPI_CR1_CPHA);
+
+  // Data size = 8-bit, set RX threshold for 8-bit
+  SPI1->CR2 |= (SPI_DATA_SIZE_8BIT << SPI_CR2_DS_Pos);
+
+  SPI1->CR1 |= SPI_CR1_SPE;  // Enable SPI
 }
 
-
 static void spi_send(uint8_t data) {
-  while (
-    (!(SPI1->SR & SPI_SR_TXE)) ||
-    (SPI1->SR & SPI_SR_BSY)
-  ); // Wait until transmit buffer is empty
-  *((__IO uint8_t *)&SPI1->DR) = data; // Send data
+  while (!(SPI1->SR & SPI_SR_TXE)) { }
+  *((__IO uint8_t *)&SPI1->DR) = data;
+}
+
+static void spi_wait_done(void) {
+  while (SPI1->SR & SPI_SR_BSY) { }
 }
 
 static void lcd_send_command(uint8_t cmd) {
-  set_gpio_data(DATA_COMMAND_PORT, DATA_COMMAND_PIN, DC_COMMAND_MODE_VAL); // Set DC for command
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_ACTIVE_VAL); // Activate chip select
+  set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
+  lcd_cs_active();
   spi_send(cmd);
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_INACTIVE_VAL); // Deactivate chip select
-
+  lcd_cs_inactive();
 }
 
-static void lcd_send_command_with_arg(uint8_t cmd, uint8_t arg) {
-  set_gpio_data(DATA_COMMAND_PORT, DATA_COMMAND_PIN, DC_COMMAND_MODE_VAL); // Set DC for command
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_ACTIVE_VAL); // Activate chip select
+static void lcd_send_command_with_args(uint8_t cmd, const uint8_t *args, uint32_t n) {
+  set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
+  lcd_cs_active();
   spi_send(cmd);
-  set_gpio_data(DATA_COMMAND_PORT, DATA_COMMAND_PIN, DC_DATA_MODE_VAL); // Set DC for data
-  spi_send(arg);
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_INACTIVE_VAL); // Deactivate chip select
+  if (n) {
+    set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
+    for (uint32_t i = 0; i < n; ++i) {
+      spi_send(args[i]);
+    }
+  }
+  lcd_cs_inactive();
 }
 
-static void lcd_send_data(uint8_t data) {
-  set_gpio_data(DATA_COMMAND_PORT, DATA_COMMAND_PIN, DC_DATA_MODE_VAL); // Set DC high for data
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_ACTIVE_VAL); // Activate chip select
-  spi_send(data);
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_INACTIVE_VAL); // Deactivate chip select
-}
-static void init_lcd() {
+static void init_lcd(void) {
   init_lcd_gpio();
+
+  // Hardware reset
+  set_gpio_data(RESET_PORT, RESET_PIN, RESET_ACTIVE_VAL);
+  delay_approx(2000000);  // ~20 ms
+  set_gpio_data(RESET_PORT, RESET_PIN, RESET_INACTIVE_VAL);
+  delay_approx(2000000);  // ~120 ms
+
   init_spi();
 
-  // Reset LCD
-  // set_gpio_data(RESET_PORT, RESET_PIN, RESET_ACTIVE_VAL); // Start reset
-  // for (volatile int i = 0; i < 100000; i++); // Delay
-  set_gpio_data(RESET_PORT, RESET_PIN, RESET_INACTIVE_VAL); // End reset
-  for (volatile int i = 0; i < 100000; i++); // Delay
-
-  // Send initialization commands
+  // Sleep Out
   lcd_send_command(SLEEP_OUT);
-  for (volatile int i = 0; i < 100000; i++); // Delay
-  lcd_send_command(DISPLAY_OFF);
-  //for (volatile int i = 0; i < 100000000; i++); // Delay
+  delay_approx(2000000);  // ~120 ms
 
-  lcd_send_command_with_arg(PIXEL_FORMAT_SET, PIXEL_FORMAT_16BIT);
+  // Pixel Format: 16 bit
+  {
+    const uint8_t pf = PIXEL_FORMAT_16BIT;
+    lcd_send_command_with_args(PIXEL_FORMAT_SET, &pf, 1);
+  }
+  delay_approx(100000);
 
-  /*
-  Bit 7: MY (row address order) = 0 ()
-  Bit 6: MX (column address order) = 1 (mirrored)
-  Bit 5: MV (row/column exchange) = 0 (normal)
-  Bit 4: ML (vertical refresh order) = 0 (normal)
-  Bit 3: BGR (RGB/BGR order) = 1 (BGR)
-  Bit 2: MH (horizontal refresh order) = 0 (normal)
-  
-  The 3 most significant bits mirror the x axis
-  */
-  lcd_send_command_with_arg(MEM_ACCESS_CTRL, DISPLAY_ORIENTATION);
-  lcd_send_data(DISPLAY_ORIENTATION);
+  // Memory Access Control (orientation)
+  {
+    const uint8_t mac = DISPLAY_ORIENTATION;
+    lcd_send_command_with_args(MEM_ACCESS_CTRL, &mac, 1);
+  }
+  delay_approx(100000);
+
+  // Display ON
   lcd_send_command(DISPLAY_ON);
-
-  // Turn on backlight
-  //BACKLIGHT_PORT->ODR |= (1 << BACKLIGHT_PIN);
-
+  delay_approx(200000);
 }
 
-
-
-int main() {
-  
+int main(void) {
   init_lcd();
+
+  // Set address window
+  uint8_t col_args[4] = {
+    0x00, 0x00,
+    (uint8_t)((LCD_WIDTH - 1) >> 8),
+    (uint8_t)((LCD_WIDTH - 1) & 0xFF)
+  };
+  uint8_t row_args[4] = {
+    0x00, 0x00,
+    (uint8_t)((LCD_HEIGHT - 1) >> 8),
+    (uint8_t)((LCD_HEIGHT - 1) & 0xFF)
+  };
+  lcd_send_command_with_args(COL_ADDR_SET, col_args, 4);
+  lcd_send_command_with_args(ROW_ADDR_SET, row_args, 4);
+
+  // Memory Write & flood red
   lcd_send_command(MEM_WRITE);
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_ACTIVE_VAL); // Activate chip select
-  set_gpio_data(DATA_COMMAND_PORT, DATA_COMMAND_PIN, DC_DATA_MODE_VAL); // Set DC for data
-  for (uint32_t i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
-    spi_send(0xF8); // Red high byte
-    spi_send(0x00); // Red low byte
+  set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
+  lcd_cs_active();
+  for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
+    spi_send(0xF8);  // Red high byte (0xF8 >> 3 gives R=31)
+    spi_send(0x00);  // Red low byte
   }
-  set_gpio_data(CHIP_SELECT_PORT, CHIP_SELECT_PIN, CHIP_SELECT_INACTIVE_VAL); // Deactivate chip select
+  spi_wait_done();
+  lcd_cs_inactive();
+
+  // Stay here
+  while (1) {
+    // optionally toggle an LED to show alive
+  }
+
   return 0;
 }
