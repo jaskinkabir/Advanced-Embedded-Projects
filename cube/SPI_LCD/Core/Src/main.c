@@ -1,7 +1,7 @@
 // lcd_display.c  
 #include <stdint.h>  
 #include "stm32f091xc.h"  
-#include "main.h" 
+#include "defines.h"
 #include "walter.h"
 
 /*  
@@ -13,51 +13,6 @@
     PA9  -> CS  (Chip Select) (Active low)  
     PB10 -> DC  (Data/Command)  (0=Command, 1=Data)
 */  
-
-#define RESET_PORT        GPIOA  
-#define RESET_PIN         1  
-#define SCK_PORT          GPIOA  
-#define SCK_PIN           5  
-#define MOSI_PORT         GPIOA  
-#define MOSI_PIN          7  
-#define CS_PORT           GPIOA  
-#define CS_PIN            9  
-#define DC_PORT           GPIOB  
-#define DC_PIN            10  
-
-#define GPIO_AF_MODE      0b10  
-#define GPIO_OUT_MODE     0b01  
-#define GPIO_SPI_AF      0    // AF0 for SPI1 on PA5, PA7
-
-#define SPI_CLOCK_PRESCALE  0b000   // f_PCLK / 2  
-#define SPI_DATA_SIZE_8BIT  0b0111  // for CR2 DS bits  
-#define SPI_DATA_SIZE_16BIT  0b1111  // for CR2 DS bits  
-
-#define SLEEP_OUT         0x11  
-#define PIXEL_FORMAT_SET  0x3A  
-#define PIXEL_FORMAT_16BIT 0x55  
-#define MEM_ACCESS_CTRL   0x36  
-#define DISPLAY_ORIENTATION 0x48  
-#define DISPLAY_OFF        0x28  
-#define DISPLAY_ON        0x29  
-#define MEM_WRITE         0x2C  
-#define COL_ADDR_SET      0x2A  
-#define ROW_ADDR_SET      0x2B  
-
-#define RESET_ACTIVE_VAL   0  
-#define RESET_INACTIVE_VAL 1  
-
-#define CS_ACTIVE_VAL      0   // assuming active‐low  
-#define CS_INACTIVE_VAL    1  
-
-#define DC_COMMAND_MODE_VAL  0  
-#define DC_DATA_MODE_VAL     1  
-
-#define LCD_WIDTH     240  
-#define LCD_HEIGHT    320  
-
-
-#define RESET_DELAY 20000
 
 static inline void set_gpio_mode(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t mode) {
   GPIOx->MODER &= ~(0b11 << (pin * 2));
@@ -198,14 +153,15 @@ static void init_lcd(void) {
   //lcd_send_command(DISPLAY_ON);
 }
 
-#define WALTER_MODE 1  
+#define WALTER_MODE 0
 
 int main(void) {
   init_lcd();
-
-
   
   if (WALTER_MODE == 0) {
+    
+    lcd_send_command(DISPLAY_OFF);
+    spi_wait_done();
     // Memory Write & flood red
     lcd_send_command(MEM_WRITE);
     set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
@@ -215,8 +171,9 @@ int main(void) {
     SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
     
     for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
-      spi_send16(0xF800);  // Red high byte (0xF8 >> 3 gives R=31)
+      spi_send16(0xF800);  // Red
     }
+    lcd_send_command(DISPLAY_ON);
     spi_wait_done();
     lcd_cs_inactive();
   }
@@ -240,11 +197,6 @@ int main(void) {
     spi_wait_done();
     lcd_send_command(DISPLAY_OFF);
     lcd_cs_inactive();
-  }
-
-  // Stay here
-  while (1) {
-    // optionally toggle an LED to show alive
   }
 
   return 0;
