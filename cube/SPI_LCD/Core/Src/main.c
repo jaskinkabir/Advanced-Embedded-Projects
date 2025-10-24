@@ -38,6 +38,7 @@
 #define PIXEL_FORMAT_16BIT 0x55  
 #define MEM_ACCESS_CTRL   0x36  
 #define DISPLAY_ORIENTATION 0x48  
+#define DISPLAY_OFF        0x28  
 #define DISPLAY_ON        0x29  
 #define MEM_WRITE         0x2C  
 #define COL_ADDR_SET      0x2A  
@@ -134,9 +135,13 @@ static inline void init_spi(void) {
   SPI1->CR1 |= SPI_CR1_SPE;  // Enable SPI
 }
 
-static void spi_send(uint8_t data) {
+static void spi_send8(uint8_t data) {
   while (!(SPI1->SR & SPI_SR_TXE)) { }
   *((__IO uint8_t *)&SPI1->DR) = data;
+}
+static void spi_send16(uint16_t data) {
+  while (!(SPI1->SR & SPI_SR_TXE)) { }
+  *((__IO uint16_t *)&SPI1->DR) = data;
 }
 
 static void spi_wait_done(void) {
@@ -146,18 +151,18 @@ static void spi_wait_done(void) {
 static void lcd_send_command(uint8_t cmd) {
   set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
   lcd_cs_active();
-  spi_send(cmd);
+  spi_send8(cmd);
   lcd_cs_inactive();
 }
 
 static void lcd_send_command_with_args(uint8_t cmd, const uint8_t *args, uint32_t n) {
   set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
   lcd_cs_active();
-  spi_send(cmd);
+  spi_send8(cmd);
   if (n) {
     set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
     for (uint32_t i = 0; i < n; ++i) {
-      spi_send(args[i]);
+      spi_send8(args[i]);
     }
   }
   lcd_cs_inactive();
@@ -190,27 +195,27 @@ static void init_lcd(void) {
   }
 
   // Display ON
-  lcd_send_command(DISPLAY_ON);
+  //lcd_send_command(DISPLAY_ON);
 }
 
-#define WALTER_MODE 0  
+#define WALTER_MODE 1  
 
 int main(void) {
   init_lcd();
 
 
-  // Memory Write & flood red
-  lcd_send_command(MEM_WRITE);
-  set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
-  lcd_cs_active();
-
-
-  SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
-
+  
   if (WALTER_MODE == 0) {
-
+    // Memory Write & flood red
+    lcd_send_command(MEM_WRITE);
+    set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
+    lcd_cs_active();
+  
+  
+    SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
+    
     for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
-      spi_send(0xF800);  // Red high byte (0xF8 >> 3 gives R=31)
+      spi_send16(0xF800);  // Red high byte (0xF8 >> 3 gives R=31)
     }
     spi_wait_done();
     lcd_cs_inactive();
@@ -218,13 +223,24 @@ int main(void) {
 
   else {
 
+    lcd_send_command(DISPLAY_OFF);
+    spi_wait_done();
+    lcd_send_command(MEM_WRITE);
+    set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
+    lcd_cs_active();
+
+    SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
     for (int i = 0; i < LCD_HEIGHT; i++) {
       for (int j = 0; j < LCD_WIDTH; j++) {
         uint16_t color = image_data[i][j];
-        spi_send(color);
+        spi_send16(color);
       }
     }
     spi_wait_done();
+    SPI1->CR2 |= (SPI_DATA_SIZE_8BIT << SPI_CR2_DS_Pos);
+    lcd_send_command(DISPLAY_ON);
+    spi_wait_done();
+    lcd_send_command(DISPLAY_OFF);
     lcd_cs_inactive();
   }
 
