@@ -230,11 +230,9 @@ int main(void) {
     lcd_cs_active();
 
     SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
-    for (int i = 0; i < LCD_HEIGHT; i++) {
-      for (int j = 0; j < LCD_WIDTH; j++) {
-        uint16_t color = image_data[i][j];
+    for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
+        uint16_t color = walter[i];
         spi_send16(color);
-      }
     }
     spi_wait_done();
     SPI1->CR2 |= (SPI_DATA_SIZE_8BIT << SPI_CR2_DS_Pos);
