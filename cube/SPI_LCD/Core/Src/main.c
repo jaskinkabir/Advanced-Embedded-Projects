@@ -1,16 +1,17 @@
 // lcd_display.c  
 #include <stdint.h>  
 #include "stm32f091xc.h"  
+#include "main.h" 
+#include "walter.h"
 
 /*  
   GFX01M2 / MB1642-DT022CTFT module  
   Pins (wired from MCU):  
     PA1  -> RST (active low)  
-    PA5  -> SPI1_SCK  
-    PA7  -> SPI1_MOSI  
-    PA9  -> CS  (Chip Select)  
-    PB10 -> DC  (Data/Command)  
-    PB8  -> Backlight (optional, if module supports)  
+    PA5  -> SCK  
+    PA7  -> MOSI  
+    PA9  -> CS  (Chip Select) (Active low)  
+    PB10 -> DC  (Data/Command)  (0=Command, 1=Data)
 */  
 
 #define RESET_PORT        GPIOA  
@@ -52,6 +53,9 @@
 
 #define LCD_WIDTH     240  
 #define LCD_HEIGHT    320  
+
+
+#define RESET_DELAY 20000
 
 static inline void set_gpio_mode(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t mode) {
   GPIOx->MODER &= ~(0b11 << (pin * 2));
@@ -163,62 +167,64 @@ static void init_lcd(void) {
 
   // Hardware reset
   set_gpio_data(RESET_PORT, RESET_PIN, RESET_ACTIVE_VAL);
-  delay_approx(2000000);  // ~20 ms
+  delay_approx(RESET_DELAY);  
   set_gpio_data(RESET_PORT, RESET_PIN, RESET_INACTIVE_VAL);
-  delay_approx(2000000);  // ~120 ms
+  delay_approx(RESET_DELAY); 
 
   init_spi();
 
   // Sleep Out
   lcd_send_command(SLEEP_OUT);
-  delay_approx(2000000);  // ~120 ms
 
   // Pixel Format: 16 bit
   {
     const uint8_t pf = PIXEL_FORMAT_16BIT;
     lcd_send_command_with_args(PIXEL_FORMAT_SET, &pf, 1);
   }
-  delay_approx(100000);
 
   // Memory Access Control (orientation)
   {
     const uint8_t mac = DISPLAY_ORIENTATION;
     lcd_send_command_with_args(MEM_ACCESS_CTRL, &mac, 1);
   }
-  delay_approx(100000);
 
   // Display ON
   lcd_send_command(DISPLAY_ON);
-  delay_approx(200000);
 }
+
+#define WALTER 1
 
 int main(void) {
   init_lcd();
 
-  // Set address window
-  uint8_t col_args[4] = {
-    0x00, 0x00,
-    (uint8_t)((LCD_WIDTH - 1) >> 8),
-    (uint8_t)((LCD_WIDTH - 1) & 0xFF)
-  };
-  uint8_t row_args[4] = {
-    0x00, 0x00,
-    (uint8_t)((LCD_HEIGHT - 1) >> 8),
-    (uint8_t)((LCD_HEIGHT - 1) & 0xFF)
-  };
-  lcd_send_command_with_args(COL_ADDR_SET, col_args, 4);
-  lcd_send_command_with_args(ROW_ADDR_SET, row_args, 4);
 
   // Memory Write & flood red
   lcd_send_command(MEM_WRITE);
   set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
   lcd_cs_active();
-  for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
-    spi_send(0xF8);  // Red high byte (0xF8 >> 3 gives R=31)
-    spi_send(0x00);  // Red low byte
+
+  if (WALTER == 0) {
+
+    for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
+      spi_send(0xF8);  // Red high byte (0xF8 >> 3 gives R=31)
+      spi_send(0x00);  // Red low byte
+    }
+    spi_wait_done();
+    lcd_cs_inactive();
   }
-  spi_wait_done();
-  lcd_cs_inactive();
+
+  else {
+
+    for (int i = 0; i < LCD_HEIGHT; i++) {
+      for (int j = 0; j < LCD_WIDTH; j++) {
+        uint16_t color = image_data[i][j];
+        spi_send((color >> 8) & 0xFF);  // High byte
+        spi_send(color & 0xFF);         // Low byte
+      }
+    }
+    spi_wait_done();
+    lcd_cs_inactive();
+  }
 
   // Stay here
   while (1) {
