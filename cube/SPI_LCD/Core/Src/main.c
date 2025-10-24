@@ -31,6 +31,7 @@
 
 #define SPI_CLOCK_PRESCALE  0b000   // f_PCLK / 2  
 #define SPI_DATA_SIZE_8BIT  0b0111  // for CR2 DS bits  
+#define SPI_DATA_SIZE_16BIT  0b1111  // for CR2 DS bits  
 
 #define SLEEP_OUT         0x11  
 #define PIXEL_FORMAT_SET  0x3A  
@@ -192,7 +193,7 @@ static void init_lcd(void) {
   lcd_send_command(DISPLAY_ON);
 }
 
-#define WALTER 1
+#define WALTER_MODE 0  
 
 int main(void) {
   init_lcd();
@@ -203,11 +204,13 @@ int main(void) {
   set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
   lcd_cs_active();
 
-  if (WALTER == 0) {
+
+  SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
+
+  if (WALTER_MODE == 0) {
 
     for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
-      spi_send(0xF8);  // Red high byte (0xF8 >> 3 gives R=31)
-      spi_send(0x00);  // Red low byte
+      spi_send(0xF800);  // Red high byte (0xF8 >> 3 gives R=31)
     }
     spi_wait_done();
     lcd_cs_inactive();
@@ -218,8 +221,7 @@ int main(void) {
     for (int i = 0; i < LCD_HEIGHT; i++) {
       for (int j = 0; j < LCD_WIDTH; j++) {
         uint16_t color = image_data[i][j];
-        spi_send((color >> 8) & 0xFF);  // High byte
-        spi_send(color & 0xFF);         // Low byte
+        spi_send(color);
       }
     }
     spi_wait_done();
