@@ -1,0 +1,203 @@
+// lcd_display.c  
+#include <stdint.h>  
+#include "stm32f091xc.h"  
+#include "defines.h"
+#include "walter.h"
+
+/*  
+  GFX01M2 / MB1642-DT022CTFT module  
+  Pins (wired from MCU):  
+    PA1  -> RST (active low)  
+    PA5  -> SCK  
+    PA7  -> MOSI  
+    PA9  -> CS  (Chip Select) (Active low)  
+    PB10 -> DC  (Data/Command)  (0=Command, 1=Data)
+*/  
+
+static inline void set_gpio_mode(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t mode) {
+  GPIOx->MODER &= ~(0b11 << (pin * 2));
+  GPIOx->MODER |= (mode << (pin * 2));
+}
+
+static inline void set_af(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t af) {
+  if (pin < 8) {
+    GPIOx->AFR[0] &= ~(0b1111 << (pin * 4));
+    GPIOx->AFR[0] |= (af << (pin * 4));
+  } else {
+    GPIOx->AFR[1] &= ~(0b1111 << ((pin - 8) * 4));
+    GPIOx->AFR[1] |= (af << ((pin - 8) * 4));
+  }
+}
+
+static inline void set_gpio_data(GPIO_TypeDef *GPIOx, uint8_t pin, uint8_t value) {
+  if (value) {
+    GPIOx->ODR |= (1U << pin);
+  } else {
+    GPIOx->ODR &= ~(1U << pin);
+  }
+}
+
+static inline void lcd_cs_active(void) {
+  set_gpio_data(CS_PORT, CS_PIN, CS_ACTIVE_VAL);
+}
+static inline void lcd_cs_inactive(void) {
+  set_gpio_data(CS_PORT, CS_PIN, CS_INACTIVE_VAL);
+}
+
+static void delay_approx(uint32_t loops) {
+  for (volatile uint32_t i = 0; i < loops; ++i) {
+    __asm__("nop");
+  }
+}
+
+static inline void init_lcd_gpio(void) {
+  RCC->AHBENR |= RCC_AHBENR_GPIOAEN | RCC_AHBENR_GPIOBEN;
+
+  // CS, RESET, DC, as outputs
+  set_gpio_mode(CS_PORT,      CS_PIN,      GPIO_OUT_MODE);
+  set_gpio_mode(RESET_PORT,   RESET_PIN,   GPIO_OUT_MODE);
+  set_gpio_mode(DC_PORT,      DC_PIN,      GPIO_OUT_MODE);
+
+  // SCK, MOSI as AF
+  set_gpio_mode(SCK_PORT,  SCK_PIN,  GPIO_AF_MODE);
+  set_af(SCK_PORT,  SCK_PIN,  GPIO_SPI_AF);  // AF0
+  set_gpio_mode(MOSI_PORT, MOSI_PIN, GPIO_AF_MODE);
+  set_af(MOSI_PORT, MOSI_PIN, GPIO_SPI_AF);  // AF0
+
+  // Default states
+  set_gpio_data(CS_PORT, CS_PIN, CS_INACTIVE_VAL);
+  set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
+  set_gpio_data(RESET_PORT, RESET_PIN, RESET_INACTIVE_VAL);
+
+}
+
+static inline void init_spi(void) {
+  RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+
+  SPI1->CR1 = 0;
+  SPI1->CR2 = 0;
+
+  SPI1->CR1 |= SPI_CR1_MSTR;  // Master mode
+  SPI1->CR1 |= (SPI_CLOCK_PRESCALE << SPI_CR1_BR_Pos);
+  SPI1->CR1 |= SPI_CR1_SSM | SPI_CR1_SSI;  // Software slave management, SSI=1
+
+  // SPI mode 0
+  SPI1->CR1 &= ~(SPI_CR1_CPOL | SPI_CR1_CPHA);
+
+  // Data size = 8-bit, set RX threshold for 8-bit
+  SPI1->CR2 |= (SPI_DATA_SIZE_8BIT << SPI_CR2_DS_Pos);
+
+  SPI1->CR1 |= SPI_CR1_SPE;  // Enable SPI
+}
+
+static void spi_send8(uint8_t data) {
+  while (!(SPI1->SR & SPI_SR_TXE)) { }
+  *((__IO uint8_t *)&SPI1->DR) = data;
+}
+static void spi_send16(uint16_t data) {
+  while (!(SPI1->SR & SPI_SR_TXE)) { }
+  *((__IO uint16_t *)&SPI1->DR) = data;
+}
+
+static void spi_wait_done(void) {
+  while (SPI1->SR & SPI_SR_BSY) { }
+}
+
+static void lcd_send_command(uint8_t cmd) {
+  set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
+  lcd_cs_active();
+  spi_send8(cmd);
+  lcd_cs_inactive();
+}
+
+static void lcd_send_command_with_args(uint8_t cmd, const uint8_t *args, uint32_t n) {
+  set_gpio_data(DC_PORT, DC_PIN, DC_COMMAND_MODE_VAL);
+  lcd_cs_active();
+  spi_send8(cmd);
+  if (n) {
+    set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
+    for (uint32_t i = 0; i < n; ++i) {
+      spi_send8(args[i]);
+    }
+  }
+  lcd_cs_inactive();
+}
+
+static void init_lcd(void) {
+  init_lcd_gpio();
+
+  // Hardware reset
+  set_gpio_data(RESET_PORT, RESET_PIN, RESET_ACTIVE_VAL);
+  delay_approx(RESET_DELAY);  
+  set_gpio_data(RESET_PORT, RESET_PIN, RESET_INACTIVE_VAL);
+  delay_approx(RESET_DELAY); 
+
+  init_spi();
+
+  // Sleep Out
+  lcd_send_command(SLEEP_OUT);
+
+  // Pixel Format: 16 bit
+  {
+    const uint8_t pf = PIXEL_FORMAT_16BIT;
+    lcd_send_command_with_args(PIXEL_FORMAT_SET, &pf, 1);
+  }
+
+  // Memory Access Control (orientation)
+  {
+    const uint8_t mac = DISPLAY_ORIENTATION;
+    lcd_send_command_with_args(MEM_ACCESS_CTRL, &mac, 1);
+  }
+
+  // Display ON
+  //lcd_send_command(DISPLAY_ON);
+}
+
+#define WALTER_MODE 0
+
+int main(void) {
+  init_lcd();
+  
+  if (WALTER_MODE == 0) {
+    
+    lcd_send_command(DISPLAY_OFF);
+    spi_wait_done();
+    // Memory Write & flood red
+    lcd_send_command(MEM_WRITE);
+    set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
+    lcd_cs_active();
+  
+  
+    SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
+    
+    for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
+      spi_send16(0xF800);  // Red
+    }
+    lcd_send_command(DISPLAY_ON);
+    spi_wait_done();
+    lcd_cs_inactive();
+  }
+
+  else {
+
+    lcd_send_command(DISPLAY_OFF);
+    spi_wait_done();
+    lcd_send_command(MEM_WRITE);
+    set_gpio_data(DC_PORT, DC_PIN, DC_DATA_MODE_VAL);
+    lcd_cs_active();
+
+    SPI1->CR2 |= (SPI_DATA_SIZE_16BIT << SPI_CR2_DS_Pos);
+    for (uint32_t i = 0; i < (uint32_t)LCD_WIDTH * (uint32_t)LCD_HEIGHT; ++i) {
+        uint16_t color = walter[i];
+        spi_send16(color);
+    }
+    spi_wait_done();
+    SPI1->CR2 |= (SPI_DATA_SIZE_8BIT << SPI_CR2_DS_Pos);
+    lcd_send_command(DISPLAY_ON);
+    spi_wait_done();
+    lcd_send_command(DISPLAY_OFF);
+    lcd_cs_inactive();
+  }
+
+  return 0;
+}
