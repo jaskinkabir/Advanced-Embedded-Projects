@@ -31,6 +31,8 @@ extern uint32_t SystemCoreClock;
 #define TIM15_SMCR_TS 0b101 // TI1FP1 selected as trigger input
 #define TIM15_SMCR_SMS 0b100 // Slave mode selection: Reset Mode
 #define ECHO_TIMEOUT_US      30000 // 30 milliseconds
+#define CM_PER_US 0.0343f // Speed of sound in cm/us 
+#define MAX_CM 300 // Maximum distance in cm
 
 
 #define TRIG_AF          0b0101    // AF5 for TIM17_CH1 on PA7

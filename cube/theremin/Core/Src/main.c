@@ -98,6 +98,21 @@ static inline void setup_echo_timer() {
   NVIC_EnableIRQ(TIM15_IRQn);
 }
 
+
+float distance_cm = 0.0;
+static void TIM15_IRQHandler(void) {
+  if ((ECHO_TIMER->SR & TIM_SR_CC2IF)) return;
+  ECHO_TIMER->SR &= ~TIM_SR_CC2IF; // Clear interrupt flag
+  if ((ECHO_TIMER->SR & TIM_SR_CC2OF)) {
+    // Timeout occurred
+    ECHO_TIMER->SR &= ~TIM_SR_CC2OF;
+    distance_cm = MAX_CM + 1; // Indicate out of range
+    return;
+  }
+  int pulse_width = ECHO_TIMER->CCR2 - ECHO_TIMER->CCR1;
+  distance_cm = (float)pulse_width * CM_PER_US / 2.0;
+}
+
 static inline void setup() {
 
 }
