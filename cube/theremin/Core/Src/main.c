@@ -55,9 +55,30 @@ static inline void setup_trig_timer() {
   TRIG_TIMER->CR1 |= TIM_CR1_OPM; // One pulse mode
 
 
-  TRIG_TIMER->PSC = 48 - 1; // Prescaler to get 1 MHz timer clock
-  TRIG_TIMER->ARR = 0xFFFF; // Max auto-reload value
+  TRIG_TIMER->PSC = GET_PSC(1000000); // Prescaler to get 1 MHz timer clock
+  TRIG_TIMER->ARR = TRIGGER_PULSE_LEN_US; // 10us
+  TRIG_TIMER->CCR1 = TRIGGER_PULSE_LEN_US; // PWM mode, pulse length 10us
+  TRIG_TIMER->CCMR1 |= (OC1M_PWM_MODE_1 << TIM_CCMR1_OC1M_Pos); // PWM mode 1
 
+  TRIG_TIMER->CCER |= TIM_CCER_CC1E; // Enable output for channel 1
+  TRIG_TIMER->BDTR |= TIM_BDTR_MOE; // Enable main output
+}
+
+static inline void setup_echo_timer() {
+  RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+  ECHO_TIMER->CR1 = 0; // Disable timer
+
+  ECHO_TIMER->PSC = GET_PSC(1000000); // Prescaler to get 1 MHz timer clock
+  ECHO_TIMER->ARR = ECHO_TIMEOUT_US; // Set max timeout
+
+  ECHO_TIMER->CCMR2 &= ~(TIM_CCMR2_CC3S);
+  ECHO_TIMER->CCMR2 |= (0b01 << TIM_CCMR2_CC3S_Pos); // Set CH3 to input, IC3 mapped on TI3
+
+  ECHO_TIMER->CCER |= TIM_CCER_CC3E; // Enable capture on CH3
+  ECHO_TIMER->CCER &= ~TIM_CCER_CC3P; // Capture rising edge
+
+  ECHO_TIMER->DIER |= TIM_DIER_CC3IE; // Enable capture interrupt
+  NVIC_EnableIRQ(TIM2_IRQn);
 }
 
 static inline void setup() {
