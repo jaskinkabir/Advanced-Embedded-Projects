@@ -25,6 +25,11 @@ extern uint32_t SystemCoreClock;
 #define TRIGGER_PULSE_LEN_US 10  // 10 microseconds
 #define OC1M_PWM_MODE_1 0b110
 
+
+#define TIM15_CC1S 0b01 // CC1 channel is configured as input, IC1 is mapped on TI1
+#define TIM15_CCR2 0b10 // CC2 channel is configured as input, IC2 is mapped on TI1
+#define TIM15_SMCR_TS 0b101 // TI1FP1 selected as trigger input
+#define TIM15_SMCR_SMS 0b100 // Slave mode selection: Reset Mode
 #define ECHO_TIMEOUT_US      30000 // 30 milliseconds
 
 

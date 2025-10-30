@@ -64,21 +64,38 @@ static inline void setup_trig_timer() {
   TRIG_TIMER->BDTR |= TIM_BDTR_MOE; // Enable main output
 }
 
+/* (1) Select the active input TI1 for TIMx_CCR1 (CC1S = 01),
+select the active input TI1 for TIMx_CCR2 (CC2S = 10) */
+/* (2) Select TI1FP1 as valid trigger input (TS = 101)
+configure the slave mode in reset mode (SMS = 100) */
+/* (3) Enable capture by setting CC1E and CC2E
+select the rising edge on CC1 and CC1N (CC1P = 0 and CC1NP = 0, reset
+value),
+select the falling edge on CC2 (CC2P = 1). */
+/* (4) Enable interrupt on Capture/Compare 1 */
+/* (5) Enable counter */
 static inline void setup_echo_timer() {
-  RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+  RCC->APB2ENR |= RCC_APB2ENR_TIM15EN;
   ECHO_TIMER->CR1 = 0; // Disable timer
+
+  ECHO_TIMER->CCR1 =0;
+  ECHO_TIMER->CCR1 |= (TIM15_CC1S << TIM_CCMR1_CC1S_Pos); // (1)
+
+  ECHO_TIMER->CCR2 =0;
+  ECHO_TIMER->CCR2 |= (TIM15_CCR2 << TIM_CCMR1_CC2S_Pos); // (1)
+
+  ECHO_TIMER->SMCR = 0;
+  ECHO_TIMER->SMCR |= (TIM15_SMCR_TS << TIM_SMCR_TS_Pos) | (TIM15_SMCR_SMS << TIM_SMCR_SMS_Pos); // (2)
+
+  ECHO_TIMER->CCER = 0;
+  ECHO_TIMER->CCER |= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC2P; // (3)
+
+  ECHO_TIMER->DIER = 0;
+  ECHO_TIMER->DIER |= TIM_DIER_CC2IE; // (4)
 
   ECHO_TIMER->PSC = GET_PSC(1000000); // Prescaler to get 1 MHz timer clock
   ECHO_TIMER->ARR = ECHO_TIMEOUT_US; // Set max timeout
-
-  ECHO_TIMER->CCMR2 &= ~(TIM_CCMR2_CC3S);
-  ECHO_TIMER->CCMR2 |= (0b01 << TIM_CCMR2_CC3S_Pos); // Set CH3 to input, IC3 mapped on TI3
-
-  ECHO_TIMER->CCER |= TIM_CCER_CC3E; // Enable capture on CH3
-  ECHO_TIMER->CCER &= ~TIM_CCER_CC3P; // Capture rising edge
-
-  ECHO_TIMER->DIER |= TIM_DIER_CC3IE; // Enable capture interrupt
-  NVIC_EnableIRQ(TIM2_IRQn);
+  NVIC_EnableIRQ(TIM15_IRQn);
 }
 
 static inline void setup() {
