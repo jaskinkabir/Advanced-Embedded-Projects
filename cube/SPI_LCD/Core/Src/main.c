@@ -153,7 +153,7 @@ static void init_lcd(void) {
   //lcd_send_command(DISPLAY_ON);
 }
 
-#define WALTER_MODE 0
+#define WALTER_MODE 1
 
 int main(void) {
   init_lcd();

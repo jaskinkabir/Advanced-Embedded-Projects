@@ -17,4 +17,4 @@ The IVT entry points to the address `0x800003CD`. To verify this is correct, I c
 The debugger gave me the value `0x800003CC`. This is weird because the address is off by one byte. However, this is explained by the fact that the least significant bit of a function pointer in ARM Cortex-M architecture indicates whether the function is using Thumb mode (which it always does). Therefore, the actual address pointed to byt the IVT is `0x800003CD & ~1 = 0x800003CC`, which matches the address given by the pointer expression. This confirms that my ISR is correctly mapped in the interrupt vector table.
 
 # Demonstration Video
-[![PWM Demo](https://img.youtube.com/vi/RPwvG5fCmM4/hqdefault.jpg)](https://www.youtube.com/shorts/RPwvG5fCmM4)
+[![Interrupt Demo](https://img.youtube.com/vi/RPwvG5fCmM4/hqdefault.jpg)](https://www.youtube.com/shorts/RPwvG5fCmM4)
