@@ -1,4 +1,6 @@
-This repo holds the project files for my Advanced Embedded Systems class at UNC Charlotte. Each folder, which you can reach through the hyperlinks below, contains a README.md file that describes the project in more detail and provides a demonstration video. I took this class in Fall 2025. The class explored advanced bare-metal programming and embedded systems architecture on the STM32-based Nucleo-F091RC Development Board.
+This repo holds the project files for my Advanced Embedded Systems class at UNC Charlotte. I took this class in Fall 2025. The class explored advanced bare-metal programming and embedded systems architecture on the STM32-based Nucleo-F091RC Development Board. 
+
+Each folder, which you can reach through the hyperlinks below, contains a README.md file that describes the project in more detail and provides a demonstration video.
 
 # Projects
 ## [Project 1: Stack Frame Analysis](./cube/stackframedebug)
